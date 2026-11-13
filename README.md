@@ -65,9 +65,37 @@ The device itself writes the file when you leave its settings menu.
 
 ## Protocol
 
-Service `fda0`: GET `fda1`, POST `fda2`, PUSH `fda3`, fast file `fda4`. See
-`app/src/main/java/arpa/home/bc200sync/Protocol.kt` for the frame format, object ids
-(delete = POST oid 42, which the device only ACKs) and the fast-transfer packet layout.
+How the app talks to the BC200, as worked out and tested on a BC200X. The code is in
+[`Protocol.kt`](app/src/main/java/arpa/home/bc200sync/Protocol.kt) (message format, no
+Android code, unit-tested) and
+[`Bc200Client.kt`](app/src/main/java/arpa/home/bc200sync/Bc200Client.kt) (the Bluetooth
+side). The `arpa/home/bc200sync` folders only follow the app's package name.
+
+- **Bluetooth LE service `fda0`** with four characteristics: GET `fda1`, POST `fda2`,
+  PUSH `fda3` (device messages) and `fda4` (fast file transfer). The app asks for an MTU of 247.
+- **Frames:** `7E`, then the escaped header + body + CRC, then `7F`. Bytes `7D`/`7E`/`7F`
+  inside are sent as `7D 01`/`7D 02`/`7D 03`.
+  - Header byte 0 = `cmd<<6 | trans<<4 | sid` (cmd 0 GET, 1 POST; trans 0 request,
+    2 ACK; sid = a 4-bit sequence number), bytes 1–2 = body length + 5, big-endian.
+  - Body = a 2-byte object id (oid), then a Protocol Buffers message.
+  - A 16-bit CRC over header + body ends the frame (see `crc16()`).
+- **Object ids:** 1 device info, 4 functions, 41 get file, 42 delete file, 43 file info,
+  44 file data, 45 stop transfer, 46 fast transfer over, 47 fast transfer result,
+  50 file status (busy or not), 51 storage.
+- **Ride list:** download the file `filelist.txt`, one `<name> <size>` per line.
+- **Downloading a file:** check that the device isn't busy (oid 50), then GET oid 41 with
+  the name. The device replies with oid 43 (the size), streams packets on `fda4`
+  (4-byte index, data, 1-byte sum) and sends oid 46 at the end. The app then POSTs oid 47
+  with either the missing packet numbers (they are sent again) or "complete". `.fit` files
+  are also checked against their own FIT checksum.
+- **Deleting a ride:** POST oid 42 with the name. The device only ACKs it, so the app reads
+  the ride list again to confirm.
+- **Settings:** the device's settings are the JSON file `Setting.json`. Read it like any
+  file; to change it, POST oid 43 (name and size), then the whole file in oid 44 packets of
+  up to 128 bytes, each starting with `[index, mark]` (mark 0 first, 1 middle, 2 last,
+  3 only). Sending only the changed values does not work on firmware V2. The device writes
+  the file when its own menu is left; the app reads it back to confirm. Field meanings and
+  units are in [`DeviceSettings.kt`](app/src/main/java/arpa/home/bc200sync/DeviceSettings.kt).
 
 ## Authors
 
