@@ -1,0 +1,28 @@
+<p>Coospo BC200 sync copies your rides (.fit files) from a <b>Coospo BC200 / BC200X</b> bike computer to a folder on your phone over Bluetooth, and lets you change the BC200's own settings. It works without the manufacturer's app and without any account.</p>
+
+<p><b>Rides</b></p>
+<ul>
+<li><b>Sync now</b> copies new rides to the folder you choose and checks each copy against its FIT checksum.</li>
+<li>After a checked copy, the ride is removed from the BC200 to free space, or kept there if you prefer.</li>
+<li>Two lists show the rides on the BC200 (marked when already on the phone) and the rides on the phone.</li>
+<li>The .fit files are standard, so any app that reads FIT can use them; copying them to a cloud or computer is up to other apps.</li>
+</ul>
+
+<p><b>BC200 settings</b></p>
+<ul>
+<li>Bikes 1–3: odometer, wheel size, bike weight, crank length.</li>
+<li>Rider: gender, age, weight, height.</li>
+<li>Device: smart pause, tone, backlight and brightness, night mode, units, time format and time zone (including automatic phone time zone with summer/winter time), storage.</li>
+<li>Every change is read back from the BC200 to confirm it was saved.</li>
+</ul>
+
+<p><b>Open and private</b></p>
+<ul>
+<li>Public domain (The Unlicense).</li>
+<li>No internet permission at all, no account, no ads, no tracking.</li>
+<li>Only one permission: Bluetooth "Nearby devices" (Android 10 and 11 require the location permission for any Bluetooth search; the app never uses your location). No storage permission: rides go only to the folder you pick.</li>
+</ul>
+
+<p>Main author of the code: Claude Opus 5.5, Anthropic's AI model, working in Claude Code. Design and testing: Jan Novák, on a real BC200X.</p>
+
+<p>Not made or endorsed by Coospo; "Coospo" and "BC200" are named only to say which device the app works with.</p>

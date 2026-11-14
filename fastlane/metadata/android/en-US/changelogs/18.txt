@@ -1,0 +1,4 @@
+First public release.
+• Copies rides (.fit) from the BC200 to a folder you choose, checked against the FIT checksum; removes them from the BC200 afterwards, or keeps them.
+• BC200 settings: bikes, rider, device (incl. automatic phone time zone).
+• Application settings and About pages.

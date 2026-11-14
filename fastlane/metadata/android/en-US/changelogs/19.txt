@@ -1,0 +1,3 @@
+No changes in the app itself.
+• Reproducible build: an unsigned build from the source is identical to this APK apart from the signature.
+• Gradle wrapper and store listing (description, icon, screenshots) added to the repository.

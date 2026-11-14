@@ -1,0 +1,1 @@
+Copy rides from a Coospo BC200 bike computer and change its settings, offline

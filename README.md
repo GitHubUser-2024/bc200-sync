@@ -117,12 +117,21 @@ side). The `arpa/home/bc200sync` folders only follow the app's package name.
 
 ## Build
 
-    gradle test assembleRelease
+    ./gradlew test assembleRelease
 
-Needs JDK 17+, Gradle 8.10, Android SDK platform 35 and a `local.properties` with `sdk.dir`.
+Needs JDK 17 or newer (releases are built with JDK 21) and the Android SDK (platform 35), found
+through `ANDROID_HOME` or a `local.properties` with `sdk.dir`. The Gradle wrapper downloads
+Gradle 8.10.2 and checks its SHA-256.
 Release signing reads `~/.android/bc200-release.properties` (`storeFile`, `storePassword`,
 `keyAlias`, `keyPassword`); the key is never stored in this repo. Without that file the release
 APK is unsigned.
+
+**Reproducible build:** an unsigned build from the release tag is identical to the published APK
+apart from its signature, so the signature can be copied onto it and verified (e.g. with
+[apksigcopier](https://github.com/obfusk/apksigcopier) `compare`). The APK contains no
+version-control info and no dependency-info block for this reason.
+
+Store texts, icon and screenshots are in `fastlane/metadata/android/en-US/`.
 
 ## Updates
 

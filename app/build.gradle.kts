@@ -18,8 +18,8 @@ android {
         applicationId = "arpa.home.bc200sync"
         minSdk = 29
         targetSdk = 35
-        versionCode = 18
-        versionName = "0.16"
+        versionCode = 19
+        versionName = "0.17"
     }
 
     signingConfigs {
@@ -37,7 +37,15 @@ android {
         getByName("release") {
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")
+            // Reproducible builds: the APK must not depend on whether the source is a git checkout.
+            vcsInfo.include = false
         }
+    }
+
+    // No Google-encrypted dependency list in the APK signing block (F-Droid, reproducible builds).
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     compileOptions {
