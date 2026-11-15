@@ -42,11 +42,15 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toolbar
 import java.io.IOException
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
 
 /**
- * Automatic flow: BC200 -> phone folder (read back and compared) -> delete on the BC200
+ * Connect lists the rides; Sync now copies them: BC200 -> phone folder (read back and compared) -> delete on the BC200
  * (confirmed by re-reading the ride list). Rides stay in the phone folder; the Nextcloud app's
  * auto upload copies them to the server.
  *
@@ -125,8 +129,16 @@ class MainActivity : Activity(), Bc200Client.Listener {
     private var appOpen = false
     private lateinit var aboutPage: LinearLayout
     private var aboutOpen = false
+    private lateinit var ridePage: LinearLayout
+    private lateinit var rideBar: Toolbar
+    private lateinit var rideContent: LinearLayout
+    private lateinit var rideScroll: ScrollView
+    private var rideOpen = false
+    private var rideShown: String? = null // file name of the ride being shown or loaded
+    private var phoneRides: List<Protocol.Ride> = emptyList() // rows of the "on this phone" list
     private val removedFromDevice = LinkedHashSet<String>()
     private var verifyingDeletes = false
+    private var syncRequested = false // set by Sync now; Connect only reads the ride list
 
     @Volatile private var destroyed = false
 
@@ -169,7 +181,7 @@ class MainActivity : Activity(), Bc200Client.Listener {
             setNavigationOnClickListener { if (drawerOpen) closeDrawer() else openDrawer() }
         }
 
-        // Status card: what the app is doing, device info and transfer progress.
+        // Status card: what the app is doing and transfer progress. Device info sits above it.
         status = TextView(this).apply {
             textSize = 17f
             gravity = Gravity.CENTER
@@ -180,7 +192,7 @@ class MainActivity : Activity(), Bc200Client.Listener {
             textSize = 13f
             gravity = Gravity.CENTER
             setTextColor(pal.onSurfaceVariant)
-            setPadding(0, dp(6), 0, 0)
+            visibility = View.GONE // shown once a BC200 has reported its battery, firmware, storage
         }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
@@ -193,25 +205,20 @@ class MainActivity : Activity(), Bc200Client.Listener {
             background = cardFrame
             setPadding(dp(20), dp(20), dp(20), dp(12))
             addView(status)
-            addView(info)
             addView(progress, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
         }
 
-        // Main actions, stacked and centred.
+        // Main actions.
         connectButton = pillButton("Connect", pal.primary, pal.onPrimary) { onConnectClicked() }
         syncButton = pillButton("Sync now", pal.tonal, pal.onTonal) { syncNow() }
-        fun pillParams(top: Int) = LinearLayout.LayoutParams(dp(260), dp(56)).apply {
-            gravity = Gravity.CENTER_HORIZONTAL
-            topMargin = top
-        }
 
         // Rides still on the BC200.
         val ridesTitle = TextView(this).apply {
             text = "Rides on the BC200"
             textSize = 14f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setTextColor(pal.onSurfaceVariant)
-            setPadding(dp(4), 0, 0, dp(4))
+            setTextColor(pal.primary)
+            setPadding(dp(8), 0, 0, dp(2))
         }
         fun rideAdapter() = object : ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, ArrayList()) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
@@ -226,7 +233,7 @@ class MainActivity : Activity(), Bc200Client.Listener {
             text = "Not connected."
             textSize = 15f
             setTextColor(pal.onSurfaceVariant)
-            setPadding(dp(4), dp(8), 0, 0)
+            setPadding(dp(8), dp(8), 0, 0)
         }
         val list = ListView(this).apply {
             adapter = this@MainActivity.adapter
@@ -241,18 +248,19 @@ class MainActivity : Activity(), Bc200Client.Listener {
         phoneTitle = TextView(this).apply {
             textSize = 14f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setTextColor(pal.onSurfaceVariant)
-            setPadding(dp(4), 0, 0, dp(4))
+            setTextColor(pal.primary)
+            setPadding(dp(8), 0, 0, dp(2))
         }
         phoneEmpty = TextView(this).apply {
             textSize = 15f
             setTextColor(pal.onSurfaceVariant)
-            setPadding(dp(4), dp(8), 0, 0)
+            setPadding(dp(8), dp(8), 0, 0)
         }
         val phoneList = ListView(this).apply {
             adapter = phoneAdapter
             divider = null
             emptyView = phoneEmpty
+            setOnItemClickListener { _, _, pos, _ -> phoneRides.getOrNull(pos)?.let { openRide(it.name) } }
         }
         val phoneBox = FrameLayout(this).apply {
             addView(phoneEmpty)
@@ -268,13 +276,19 @@ class MainActivity : Activity(), Bc200Client.Listener {
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            addView(info, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(4) })
             addView(card, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
-            addView(connectButton, pillParams(dp(28)))
-            addView(syncButton, pillParams(dp(12)))
-            addView(ridesTitle, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(32) })
-            addView(listBox, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
-            addView(phoneTitle, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(16) })
-            addView(phoneBox, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+            // Connect and Sync now side by side, equal width.
+            addView(
+                LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    addView(connectButton, LinearLayout.LayoutParams(0, dp(56), 1f))
+                    addView(syncButton, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginStart = dp(12) })
+                },
+                LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(20) },
+            )
+            addView(listCard(ridesTitle, listBox), LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply { topMargin = dp(24) })
+            addView(listCard(phoneTitle, phoneBox), LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply { topMargin = dp(12) })
             addView(versionText)
         }
         val column = LinearLayout(this).apply {
@@ -288,8 +302,10 @@ class MainActivity : Activity(), Bc200Client.Listener {
         val settingsContent = buildSettingsPage()
         val appContent = buildAppPage()
         val aboutContent = buildAboutPage(version)
+        buildRidePage()
         val root = FrameLayout(this).apply {
             addView(column, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            addView(ridePage, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(settingsPage, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(appPage, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(aboutPage, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -311,6 +327,8 @@ class MainActivity : Activity(), Bc200Client.Listener {
                 appContent.setPadding(pad + l, 0, pad + r, pad + b)
                 (aboutPage.getChildAt(0) as Toolbar).setPadding(l, t, r, 0)
                 aboutContent.setPadding(pad + l, 0, pad + r, pad + b)
+                rideBar.setPadding(l, t, r, 0)
+                rideContent.setPadding(pad + l, 0, pad + r, pad + b)
                 content.setPadding(pad + l, 0, pad + r, pad / 2 + b)
                 drawer.setPadding(l, t + dp(8), 0, b)
                 insets
@@ -320,6 +338,16 @@ class MainActivity : Activity(), Bc200Client.Listener {
         drawEdgeToEdge()
         showFolder()
         updateButtons()
+    }
+
+    /** A rounded box holding a list title and its (scrolling) list. */
+    private fun listCard(title: TextView, list: View) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(pal.card, dp(24).toFloat())
+        clipToOutline = true // list rows and their touch ripples stay inside the rounded corners
+        setPadding(dp(8), dp(14), dp(8), dp(8))
+        addView(title, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        addView(list, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
     }
 
     /** Draw behind the status and navigation bars, with bar icons readable in light and dark mode. */
@@ -527,6 +555,8 @@ class MainActivity : Activity(), Bc200Client.Listener {
     override fun onBackPressed() {
         if (drawerOpen) {
             closeDrawer()
+        } else if (rideOpen) {
+            closeRide()
         } else if (aboutOpen) {
             aboutOpen = false
             aboutPage.visibility = View.GONE
@@ -546,6 +576,218 @@ class MainActivity : Activity(), Bc200Client.Listener {
         client.disconnect()
         io.shutdown()
         super.onDestroy()
+    }
+
+    // ---------- Ride page (one .fit file from the phone sync folder) ----------
+
+    private fun buildRidePage() {
+        rideBar = Toolbar(this).apply {
+            title = "Ride"
+            setTitleTextColor(pal.onSurface)
+            setBackgroundColor(pal.surface)
+            navigationIcon = getDrawable(R.drawable.ic_arrow_back)!!.mutate().apply { setTint(pal.onSurface) }
+            navigationContentDescription = "Back"
+            setNavigationOnClickListener { closeRide() }
+        }
+        rideContent = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        rideScroll = ScrollView(this).apply { addView(rideContent) }
+        ridePage = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(pal.surface)
+            isClickable = true // swallow touches so they don't reach the screen below
+            visibility = View.GONE
+            addView(rideBar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(rideScroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        }
+    }
+
+    private fun closeRide() {
+        rideOpen = false
+        rideShown = null
+        ridePage.visibility = View.GONE
+        rideContent.removeAllViews()
+    }
+
+    /** Opens the ride page and reads + parses the file in the background. */
+    private fun openRide(name: String) {
+        val tree = treeUri() ?: return
+        rideOpen = true
+        rideShown = name
+        rideBar.title = rideDate(name) ?: name
+        rideContent.removeAllViews()
+        rideContent.addView(rideMessage("Reading the ride…"))
+        rideScroll.scrollTo(0, 0)
+        ridePage.visibility = View.VISIBLE
+        io.execute {
+            val result: Any = try {
+                val id = listFolder(tree)?.get(name) ?: throw IOException("the file is no longer in the phone sync folder")
+                val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("cannot open it")
+                FitFile.parse(bytes)
+            } catch (e: Exception) {
+                e.message ?: e.javaClass.simpleName
+            }
+            handler.post {
+                if (destroyed || !rideOpen || rideShown != name) return@post
+                rideContent.removeAllViews()
+                if (result is FitFile.Ride) showRide(result) else rideContent.addView(rideMessage("Cannot show this ride: $result"))
+            }
+        }
+    }
+
+    /** "2026-11-08  15:50" from a BC200 file name (local time of the BC200), or null. */
+    private fun rideDate(n: String) = if (n.length >= 12 && n.take(12).all(Char::isDigit)) {
+        "${n.substring(0, 4)}-${n.substring(4, 6)}-${n.substring(6, 8)}  ${n.substring(8, 10)}:${n.substring(10, 12)}"
+    } else {
+        null
+    }
+
+    private fun rideMessage(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 16f
+        gravity = Gravity.CENTER
+        setTextColor(pal.onSurface)
+        background = rounded(pal.card, dp(24).toFloat())
+        setPadding(dp(20), dp(20), dp(20), dp(20))
+        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) }
+    }
+
+    private fun duration(s: Double): String {
+        val t = Math.round(s)
+        return if (t >= 3600) "%d:%02d:%02d".format(t / 3600, t / 60 % 60, t % 60) else "%d:%02d".format(t / 60, t % 60)
+    }
+
+    private fun showRide(ride: FitFile.Ride) {
+        val s = ride.summary
+        val r = ride.samples
+        val fmt = { pattern: String, v: Double -> String.format(Locale.getDefault(), pattern, v) }
+        s.start?.let {
+            val t = Instant.ofEpochSecond(it).atZone(ZoneId.systemDefault())
+            rideBar.title = t.format(DateTimeFormatter.ofPattern("EEE d MMM yyyy, HH:mm", Locale.getDefault()))
+        }
+
+        // Summary: tiles of value + label, two per row; only what the file has.
+        val tiles = ArrayList<Pair<String, String>>()
+        s.distanceM?.let { tiles += fmt("%.2f km", it / 1000) to "Distance" }
+        s.movingS?.let { tiles += duration(it) to "Moving time" }
+        s.avgSpeed?.let { tiles += fmt("%.1f km/h", it * 3.6) to "Average speed" }
+        s.maxSpeed?.let { tiles += fmt("%.1f km/h", it * 3.6) to "Max speed" }
+        s.elapsedS?.let { tiles += duration(it) to "Total time (with pauses)" }
+        s.ascentM?.let { tiles += "$it m" + (s.descentM?.let { d -> " / $d m" } ?: "") to "Climb / descent" }
+        s.avgHr?.let { tiles += "$it bpm" to "Average heart rate" }
+        s.maxHr?.let { tiles += "$it bpm" to "Max heart rate" }
+        s.avgCadence?.let { tiles += "$it rpm" to "Average cadence" }
+        s.maxCadence?.let { tiles += "$it rpm" to "Max cadence" }
+        if (s.minAltM != null && s.maxAltM != null) tiles += fmt("%.0f", s.minAltM) + "–" + fmt("%.0f m", s.maxAltM) to "Altitude"
+        s.avgTempC?.let { tiles += "$it °C" + (s.maxTempC?.let { m -> " (max $m)" } ?: "") to "Temperature" }
+        s.calories?.let { tiles += "$it kcal" to "Calories (estimate)" }
+        if (s.laps > 1) tiles += "${s.laps}" to "Laps"
+        val summary = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(pal.card, dp(24).toFloat())
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        for (pair in tiles.chunked(2)) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for ((value, label) in pair) {
+                row.addView(
+                    LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(4), dp(8), dp(4), dp(8))
+                        addView(
+                            TextView(context).apply {
+                                text = value
+                                textSize = 20f
+                                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                                setTextColor(pal.onSurface)
+                            },
+                        )
+                        addView(
+                            TextView(context).apply {
+                                text = label
+                                textSize = 13f
+                                setTextColor(pal.onSurfaceVariant)
+                            },
+                        )
+                    },
+                    LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f),
+                )
+            }
+            if (pair.size == 1) row.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
+            summary.addView(row)
+        }
+        rideContent.addView(summary, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
+
+        // Charts over distance (km), or over time (minutes) when the file has no distance.
+        val byDistance = r.distanceM.any { !it.isNaN() && it > 0 }
+        val x = FloatArray(r.size)
+        var last = 0f
+        for (i in 0 until r.size) {
+            val v = if (byDistance) r.distanceM[i] / 1000 else r.timeS[i] / 60
+            if (!v.isNaN() && v >= last) last = v
+            x[i] = last
+        }
+        val xLabel: (Float) -> String =
+            if (byDistance) { v -> fmt("%.1f km", v.toDouble()) } else { v -> duration(v * 60.0) }
+        val grid = Palette.withAlpha(pal.onSurfaceVariant, 0x30)
+        fun chart(title: String, y: FloatArray, color: Int, unit: (Float) -> String, skipZeroOnly: Boolean = false) {
+            if (y.none { !it.isNaN() && (!skipZeroOnly || it > 0) }) return
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = rounded(pal.card, dp(24).toFloat())
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                addView(
+                    TextView(context).apply {
+                        text = title
+                        textSize = 14f
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        setTextColor(pal.primary)
+                    },
+                )
+                addView(
+                    ChartView(context, x, y, color, pal.onSurfaceVariant, grid, xLabel, unit),
+                    LinearLayout.LayoutParams(MATCH_PARENT, dp(150)).apply { topMargin = dp(4) },
+                )
+            }
+            rideContent.addView(card, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) })
+        }
+        val speedKmh = FloatArray(r.size) { r.speed[it] * 3.6f }
+        chart("Speed", speedKmh, pal.primary, { fmt("%.0f km/h", it.toDouble()) })
+        chart("Heart rate", r.hr, Color.rgb(0xE5, 0x39, 0x35), { fmt("%.0f bpm", it.toDouble()) }, skipZeroOnly = true)
+        chart("Cadence", r.cadence, Color.rgb(0x8E, 0x24, 0xAA), { fmt("%.0f rpm", it.toDouble()) }, skipZeroOnly = true)
+        chart("Altitude", r.altitudeM, Color.rgb(0x6D, 0x8B, 0x3A), { fmt("%.0f m", it.toDouble()) })
+        chart("Temperature", r.tempC, Color.rgb(0xF5, 0x7C, 0x00), { fmt("%.0f °C", it.toDouble()) })
+
+        // Route shape (no map), when the ride has GPS positions.
+        if (r.hasPosition) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = rounded(pal.card, dp(24).toFloat())
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                addView(
+                    TextView(context).apply {
+                        text = "Route (no map; north is up, green = start, red = end)"
+                        textSize = 14f
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        setTextColor(pal.primary)
+                    },
+                )
+                addView(
+                    TrackView(context, r.lat, r.lon, pal.onSurface, Color.rgb(0x43, 0xA0, 0x47), Color.rgb(0xE5, 0x39, 0x35)),
+                    LinearLayout.LayoutParams(MATCH_PARENT, dp(280)).apply { topMargin = dp(4) },
+                )
+            }
+            rideContent.addView(card, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) })
+        }
+        rideContent.addView(
+            TextView(this).apply {
+                text = "Drag sideways on a chart to read values. " +
+                    (ride.device?.let { "Recorded by $it. " } ?: "") + "${r.size} points."
+                textSize = 13f
+                setTextColor(pal.onSurfaceVariant)
+                setPadding(dp(12), dp(12), dp(12), 0)
+            },
+        )
     }
 
     // ---------- BC200 settings page ----------
@@ -1211,8 +1453,11 @@ class MainActivity : Activity(), Bc200Client.Listener {
         updateButtons()
     }
 
+    /** The only way rides are copied (and removed from the BC200): Connect just lists them. */
     private fun syncNow() {
-        if (client.isReady && queue.isEmpty() && !verifyingDeletes) client.refreshRides()
+        if (!client.isReady || queue.isNotEmpty() || verifyingDeletes) return
+        syncRequested = true
+        client.refreshRides()
     }
 
     private fun requiredPermissions() =
@@ -1308,7 +1553,6 @@ class MainActivity : Activity(), Bc200Client.Listener {
         }
         prefs().edit().putString(KEY_TREE, uri.toString()).apply()
         showFolder()
-        if (rides.isNotEmpty()) startQueue(rides)
     }
 
     /** File name to document id in the chosen folder, or null if it cannot be read. */
@@ -1365,6 +1609,7 @@ class MainActivity : Activity(), Bc200Client.Listener {
         phoneTitle.text = "Rides on this phone (local only) · ${folderLabel()}"
         val local = onPhone.filterKeys { it.endsWith(".fit", ignoreCase = true) }
             .map { (n, size) -> Protocol.Ride(n, size.toInt()) }.sortedByDescending { it.name }
+        phoneRides = local
         phoneAdapter.clear()
         phoneAdapter.addAll(local.map { r -> label(r) + if (savedThisRun.any { it.name == r.name }) "   new" else "" })
         phoneAdapter.notifyDataSetChanged()
@@ -1433,11 +1678,14 @@ class MainActivity : Activity(), Bc200Client.Listener {
             finishDeviceRun(rides.map { it.name }.toSet())
             return
         }
+        val sync = syncRequested
+        syncRequested = false
         if (rides.isEmpty()) {
             onStatus("No rides on the BC200.")
             autoTimeZone()
             return
         }
+        if (!sync) return showListedOnly(rides)
         val tree = treeUri() ?: return startQueue(rides)
         io.execute {
             val sizes = folderSizes(tree)
@@ -1453,6 +1701,30 @@ class MainActivity : Activity(), Bc200Client.Listener {
                 } else {
                     startQueue(todo)
                 }
+            }
+        }
+    }
+
+    /** After Connect: show how many rides are waiting, copy nothing. */
+    private fun showListedOnly(rides: List<Protocol.Ride>) {
+        val tree = treeUri()
+        if (tree == null) {
+            onStatus("${rides.size} ride(s) on the BC200. Choose a phone sync folder first: ☰ → Application settings.")
+            autoTimeZone()
+            return
+        }
+        io.execute {
+            val sizes = folderSizes(tree)
+            handler.post {
+                if (destroyed) return@post
+                onPhone = sizes ?: emptyMap()
+                showRides()
+                val new = rides.count { onPhone[it.name] != it.size.toLong() }
+                onStatus(
+                    if (new == 0) "Connected. All ${rides.size} ride(s) on the BC200 are already on this phone."
+                    else "Connected. $new new ride(s) on the BC200. Tap Sync now to copy them.",
+                )
+                autoTimeZone()
             }
         }
     }
@@ -1547,12 +1819,11 @@ class MainActivity : Activity(), Bc200Client.Listener {
     private fun finishDeviceRun(stillOnDevice: Set<String>?) {
         verifyingDeletes = false
         val notRemoved = removedFromDevice.filter { stillOnDevice?.contains(it) == true }
-        val removed = removedFromDevice.size - notRemoved.size
         removedFromDevice.clear()
         onStatus(
             buildString {
-                append("Saved $copiedCount ride(s) on this phone (local only, folder ${folderLabel()})")
-                append(if (keepOnBc200()) "; they stay on the BC200 too." else "; removed $removed from the BC200.")
+                append("Downloaded $copiedCount ride(s).")
+                // Only problems are reported beyond the count.
                 if (notRemoved.isNotEmpty()) append(" ${notRemoved.size} could not be removed from the BC200.")
                 if (failures > 0) append(" $failures failed.")
             },
@@ -1610,6 +1881,7 @@ class MainActivity : Activity(), Bc200Client.Listener {
 
     override fun onDeviceInfo(text: String) {
         info.text = text
+        info.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
     }
 
     override fun onError(text: String) {
@@ -1618,6 +1890,7 @@ class MainActivity : Activity(), Bc200Client.Listener {
 
     override fun onDisconnected() {
         tzChecked = false
+        syncRequested = false
         if (settingsOpen && !settingsBusy) {
             setSettingsEnabled(false)
             settingsMsg.text = "Disconnected from the BC200."

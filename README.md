@@ -21,7 +21,8 @@ device the app works with.
 
 ## What it does
 
-When connected (and on **Sync now**), for every ride on the BC200:
+**Connect** only connects and lists the rides on the BC200; nothing is copied or removed. **Sync now**
+then, for every ride on the BC200:
 
 1. Downloads it and checks the size and the whole-file FIT CRC.
 2. Saves it to the chosen phone sync folder, reads it back and compares it byte for byte.
@@ -30,8 +31,10 @@ When connected (and on **Sync now**), for every ride on the BC200:
    phone folder (same name and size) are then not copied again.
 
 The main screen lists the rides on the BC200 (while connected) and the rides on this phone (the
-`.fit` files in the sync folder, read at start). Rides stay local in the phone folder; syncing
-them to a server is left to other apps; this app has no internet permission.
+`.fit` files in the sync folder, read at start). Tap a ride on the phone to see it: summary
+(distance, times, speed, heart rate, cadence, climb, temperature), charts over the distance and the
+route shape (without a map). Rides stay local in the phone folder; syncing them to a server is left
+to other apps; this app has no internet permission.
 
 ## BC200 settings
 

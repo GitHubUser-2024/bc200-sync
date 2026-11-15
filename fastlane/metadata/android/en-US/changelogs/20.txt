@@ -1,0 +1,4 @@
+• Ride view: tap a ride on the phone to see its summary, charts (speed, heart rate, cadence, altitude, temperature) and route shape (no map).
+• Connect only connects and lists the rides; Sync now copies them.
+• Connect and Sync now side by side; both ride lists in their own boxes.
+• Device info (battery, firmware, storage) above the status box; the status box after a sync shows only the number of downloaded rides.
