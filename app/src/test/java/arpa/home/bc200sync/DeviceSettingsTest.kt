@@ -14,6 +14,7 @@ import arpa.home.bc200sync.DeviceSettings.ODOMETERS
 import arpa.home.bc200sync.DeviceSettings.WHEELS
 import arpa.home.bc200sync.DeviceSettings.BIKE_WEIGHTS
 import arpa.home.bc200sync.DeviceSettings.CRANKS
+import arpa.home.bc200sync.DeviceSettings.SPEED_SOURCES
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,21 +48,30 @@ class DeviceSettingsTest {
         			"weight":	90,
         			"weight_e":	198,
         			"crank_length":	1700,
-        			"odo":	12345678.900000
+        			"odo":	12345678.900000,
+        			"spd_priority_1":	1,
+        			"spd_priority_2":	2,
+        			"spd_priority_3":	0
         		}, {
         			"name":	"",
         			"wheelsize":	2070,
         			"weight":	80,
         			"weight_e":	176,
         			"crank_length":	1725,
-        			"odo":	0
+        			"odo":	0,
+        			"spd_priority_1":	0,
+        			"spd_priority_2":	1,
+        			"spd_priority_3":	0
         		}, {
         			"name":	"",
         			"wheelsize":	2070,
         			"weight":	80,
         			"weight_e":	176,
         			"crank_length":	1725,
-        			"odo":	0.000010
+        			"odo":	0.000010,
+        			"spd_priority_1":	0,
+        			"spd_priority_2":	1,
+        			"spd_priority_3":	2
         		}],
         	"tone_profile":	{
         		"key_tone":	false,
@@ -180,7 +190,7 @@ class DeviceSettingsTest {
         assertFalse(DeviceSettings.needsConfirm(WEIGHT))
         // Only bike 2's odo changes; bike 1 keeps its exact text, and the rider weight is untouched.
         val out = String(DeviceSettings.withValues(sample, mapOf(ODOMETERS[1] to "10")))
-        assertEquals(DeviceSettings.minify(String(sample)).replace("\"odo\":0}", "\"odo\":10}"), out)
+        assertEquals(DeviceSettings.minify(String(sample)).replace("\"odo\":0,\"spd", "\"odo\":10,\"spd"), out)
         val back = DeviceSettings.read(out.toByteArray())
         assertEquals(listOf("12345678.900000", "10", "0.000010"), ODOMETERS.map { back[it] })
         assertEquals("1000", back[WEIGHT])
@@ -222,9 +232,29 @@ class DeviceSettingsTest {
         assertEquals(DeviceSettings.ODOMETERS[1], (bike.items[1] as DeviceSettings.Item.Page).options[0])
         val all = DeviceSettings.ALL
         assertEquals(all.size, all.toSet().size)
-        assertEquals(29, all.size)
+        assertEquals(32, all.size)
         assertEquals("Time zone", TIME_ZONE.longTitle)
         assertEquals("Brightness", BRIGHTNESS.longTitle)
+    }
+
+    @Test fun speedSource() {
+        val v = DeviceSettings.read(sample)
+        assertEquals("1,2,0", v[SPEED_SOURCES[0]])
+        assertEquals("Spd › Spd&Cad › GPS", DeviceSettings.label(SPEED_SOURCES[0], v[SPEED_SOURCES[0]]))
+        assertEquals("GPS › Spd › Spd&Cad", DeviceSettings.label(SPEED_SOURCES[2], v[SPEED_SOURCES[2]]))
+        // A duplicate set on the device is shown as stored, and is not a value the app writes.
+        assertEquals("GPS › Spd › GPS (incomplete)", DeviceSettings.label(SPEED_SOURCES[1], v[SPEED_SOURCES[1]]))
+        assertFalse(DeviceSettings.valid(SPEED_SOURCES[1], "0,1,0"))
+        assertEquals(6, (SPEED_SOURCES[0].kind as DeviceSettings.Kind.Choice).options.size)
+        assertEquals("Bike 2 speed source", SPEED_SOURCES[1].longTitle)
+        // Bike 2 only: its three priorities change, nothing else.
+        val out = String(DeviceSettings.withValues(sample, mapOf(SPEED_SOURCES[1] to "2,1,0")))
+        val bikes = out.substringAfter("\"bike_profile\":[").split("},{")
+        assertTrue(bikes[1].contains("\"spd_priority_1\":2,\"spd_priority_2\":1,\"spd_priority_3\":0"))
+        assertTrue(bikes[0].contains("\"spd_priority_1\":1,\"spd_priority_2\":2,\"spd_priority_3\":0"))
+        assertTrue(bikes[2].contains("\"spd_priority_1\":0,\"spd_priority_2\":1,\"spd_priority_3\":2"))
+        assertEquals("2,1,0", DeviceSettings.read(out.toByteArray())[SPEED_SOURCES[1]])
+        assertEquals(DeviceSettings.minify(String(sample)).length, out.length)
     }
 
     @Test fun odometerMissingBikeIsNull() {

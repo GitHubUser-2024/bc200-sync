@@ -1606,7 +1606,7 @@ class MainActivity : Activity(), Bc200Client.Listener {
         adapter.addAll(rides.map { label(it) + if (onPhone[it.name] == it.size.toLong()) "   ✓ on phone" else "" })
         adapter.notifyDataSetChanged()
         // Rides on this phone: the .fit files in the sync folder, newest first.
-        phoneTitle.text = "Rides on this phone (local only) · ${folderLabel()}"
+        phoneTitle.text = "Rides on this phone · ${folderLabel()}"
         val local = onPhone.filterKeys { it.endsWith(".fit", ignoreCase = true) }
             .map { (n, size) -> Protocol.Ride(n, size.toInt()) }.sortedByDescending { it.name }
         phoneRides = local

@@ -59,6 +59,7 @@ against the BC200X menu:
 | Bike wheel circumference | `bike_profile[0..2].wheelsize` | mm, 10–9999 |
 | Bike weight | `bike_profile[0..2].weight` (+ `weight_e`) | kg × 10; `weight_e` = floor(kg × 22.046226), i.e. tenths of lb (unlike the rider) |
 | Crank length | `bike_profile[0..2].crank_length` | mm × 10, 110.0–220.0 in 0.5 mm steps |
+| Speed source (Spd Source, priority 1–3) | `bike_profile[0..2].spd_priority_1..3` | 0 = GPS, 1 = Spd (speed sensor), 2 = Spd&Cad; the app writes only complete orders (each source once) |
 
 The BC200X ("version":"V2" settings) only accepts the whole `Setting.json` (upload: POST oid 43
 FileInfo, then oid 44 packets, each ACKed). The app strips the whitespace from the device's own

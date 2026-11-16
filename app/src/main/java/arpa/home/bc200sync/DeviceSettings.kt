@@ -31,7 +31,11 @@ object DeviceSettings {
         }
     }
 
-    /** A value in [section], or in its [index]-th object when the section is a list (bike_profile). */
+    /**
+     * A value in [section], or in its [index]-th object when the section is a list (bike_profile).
+     * An option stored in several keys ([keys], e.g. the speed source's three priorities) has one
+     * token holding all of them, comma-separated in key order ("0,1,2").
+     */
     class Option(
         val section: String,
         val key: String,
@@ -39,6 +43,7 @@ object DeviceSettings {
         val kind: Kind,
         val index: Int = -1,
         private val fullTitle: String? = null,
+        val keys: List<String> = listOf(key),
     ) {
         override fun toString() = if (index < 0) "$section.$key" else "$section[$index].$key"
 
@@ -95,6 +100,21 @@ object DeviceSettings {
         Option("bike_profile", "crank_length", "Crank length", Kind.Number(110, 220, "mm", 10, 5), i)
     }
 
+    // Speed source: the bike menu's "Spd Source", priorities 1–3, each stored as 0 = GPS,
+    // 1 = Spd (speed sensor), 2 = Spd&Cad (checked on a BC200X: Prio GPS, Spd, Spd&Cad → 0,1,2).
+    // The app offers only complete orders (each source once); the device may hold duplicates.
+    val SPEED_SOURCE_NAMES = listOf("GPS", "Spd", "Spd&Cad")
+    private val SPEED_ORDERS = listOf(listOf(2, 1, 0), listOf(2, 0, 1), listOf(1, 2, 0), listOf(1, 0, 2), listOf(0, 2, 1), listOf(0, 1, 2))
+    val SPEED_SOURCES: List<Option> = (0..2).map { i ->
+        Option(
+            "bike_profile", "spd_priority", "Speed source",
+            Kind.Choice(SPEED_ORDERS.map { o -> speedLabel(o) to o.joinToString(",") }), i,
+            keys = listOf("spd_priority_1", "spd_priority_2", "spd_priority_3"),
+        )
+    }
+
+    private fun speedLabel(order: List<Int>) = order.joinToString(" › ") { SPEED_SOURCE_NAMES.getOrElse(it) { "?" } }
+
     /** The app's settings menu, built like the BC200's own: pages, sub-headings and settings. */
     sealed class Item {
         /** A menu page; [summary] is the fixed subtitle of its row, else the row shows its values. */
@@ -122,7 +142,7 @@ object DeviceSettings {
             Item.Page(
                 "Bike",
                 (0..2).map { Item.Page("Bike ${it + 1}", bike(it).map { o -> Item.Setting(o) }) },
-                "Total distance, wheel, weight, crank",
+                "Total distance, wheel, weight, crank, speed source",
             ),
             Item.Page(
                 "User",
@@ -144,7 +164,7 @@ object DeviceSettings {
         ),
     )
 
-    private fun bike(i: Int) = listOf(ODOMETERS[i], WHEELS[i], BIKE_WEIGHTS[i], CRANKS[i])
+    private fun bike(i: Int) = listOf(ODOMETERS[i], WHEELS[i], BIKE_WEIGHTS[i], CRANKS[i], SPEED_SOURCES[i])
 
     /** Options whose change loses data the rider cannot get back, so saving asks first. */
     fun needsConfirm(o: Option) = o in ODOMETERS
@@ -280,13 +300,21 @@ object DeviceSettings {
             numberToken(it.setScale(1, java.math.RoundingMode.DOWN)) + " km"
         } ?: "value $token"
         o.kind is Kind.Number -> numberText(o, token).ifEmpty { "value $token" } + " " + (o.kind as Kind.Number).unit
+        o in SPEED_SOURCES && !valid(o, token) ->
+            // A duplicate set on the device ("0,1,0"): show it as stored.
+            speedLabel(token.split(",").map { it.trim().toIntOrNull() ?: -1 }) + " (incomplete)"
         else -> (o.kind as Kind.Choice).options.firstOrNull { same(it.second, token) }?.first ?: "value $token"
     }
 
     /** Current value token of every known option; null when the file has no single such value. */
     fun read(file: ByteArray): Map<Option, String?> {
         val min = minify(String(file, Charsets.UTF_8))
-        return ALL.associateWith { o -> block(min, o)?.let { field(it.value, o.key)?.groupValues?.get(1) } }
+        return ALL.associateWith { o ->
+            block(min, o)?.let { b ->
+                val parts = o.keys.map { k -> field(b.value, k)?.groupValues?.get(1) }
+                if (parts.any { it == null }) null else parts.joinToString(",")
+            }
+        }
     }
 
     /** The whole settings file with only the given values changed, ready to send. */
@@ -297,7 +325,8 @@ object DeviceSettings {
         }
         for ((o, token) in changes) {
             if (!valid(o, token)) throw SettingsException("Value $token is not allowed for ${o.longTitle}.")
-            for ((key, t) in mapOf(o.key to token) + derived(o, token)) {
+            val parts = if (o.keys.size > 1) o.keys.zip(token.split(",")) else listOf(o.key to token)
+            for ((key, t) in parts.toMap() + derived(o, token)) {
                 val s = block(min, o) ?: throw SettingsException("The BC200 settings have no single $o.")
                 val f = field(s.value, key) ?: throw SettingsException("The BC200 settings have no single $key value.")
                 min = min.replaceRange(s.range, s.value.replaceRange(f.groups[1]!!.range, t))

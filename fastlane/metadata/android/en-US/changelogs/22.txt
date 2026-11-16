@@ -1,0 +1,1 @@
+• Fix: with no rides on the BC200, reading its settings failed with "The BC200 is busy". An empty ride list is now closed the way the BC200 expects.

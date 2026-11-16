@@ -300,8 +300,9 @@ class Bc200Client(private val ctx: Context, private val listener: Listener) {
             Protocol.OID_FILE_INFO -> {
                 val t = transfer ?: return
                 val size = (Protocol.pbParse(value)[2] as? Long)?.let(Protocol::zigzag)?.toInt() ?: 0
+                // An empty file (filelist.txt with no rides) also ends with "transfer over"; the
+                // BC200 stays busy until it gets "complete" AFTER that, so no shortcut here.
                 t.file = Protocol.FastFile(size)
-                if (size == 0) finishTransfer(t, ByteArray(0))
             }
             Protocol.OID_FAST_OVER -> transfer?.let(::transferOver)
             else -> waiting.remove(oid)?.invoke(value)

@@ -15,6 +15,12 @@ class ProtocolTest {
         return p + byteArrayOf(p.sumOf { it.toInt() and 0xFF }.toByte())
     }
 
+    @Test fun emptyFileIsCompleteWithoutPackets() {
+        val f = Protocol.FastFile(0)
+        assertEquals(emptyList<Int>(), f.missing())
+        assertArrayEquals(ByteArray(0), f.assemble())
+    }
+
     @Test fun crcCheckValue() = assertEquals(0x29B1, Protocol.crc16("123456789".toByteArray()))
 
     // Same bytes as the request that the real BC200 answered.

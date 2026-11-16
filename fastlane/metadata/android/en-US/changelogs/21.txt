@@ -1,0 +1,2 @@
+• BC200 settings → Bike 1–3: speed source (priority of GPS, speed sensor and speed & cadence sensor).
+• New store screenshots, including the ride view.

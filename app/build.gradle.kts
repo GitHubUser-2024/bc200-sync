@@ -18,8 +18,8 @@ android {
         applicationId = "arpa.home.bc200sync"
         minSdk = 29
         targetSdk = 35
-        versionCode = 20
-        versionName = "0.18"
+        versionCode = 23
+        versionName = "0.19.2"
     }
 
     signingConfigs {
